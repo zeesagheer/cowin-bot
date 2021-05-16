@@ -1,5 +1,7 @@
 package com.zeeshan.cowin.service.impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pengrad.telegrambot.TelegramBot;
 import com.pengrad.telegrambot.model.Message;
 import com.pengrad.telegrambot.model.Update;
@@ -20,13 +22,20 @@ public class TelegramBotServiceImpl implements TelegramBotService {
     @Autowired
     TelegramBot telegramBot;
 
+    @Autowired
+    ObjectMapper mapper;
+
     @Value("${telegram.bot.group.chat.id}")
     String chatId;
 
     @Override
     public Boolean executeAction(Update update) {
         Message message = update.message();
-        log.info(update.toString());
+        try {
+            log.info(mapper.writeValueAsString(update));
+        } catch (JsonProcessingException e) {
+            log.info(update.toString(), e);
+        }
 //        Long chatId = message.from();
         Long chatId = message.chat().id();
         String text = message.text();
