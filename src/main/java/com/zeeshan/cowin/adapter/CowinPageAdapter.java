@@ -35,6 +35,7 @@ public class CowinPageAdapter {
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("Accept", "*/*");
             headers.set("User-Agent", "PostmanRuntime/7.28.0");
+            headers.set("Host", "cdn-api.co-vin.in");
             if (StringUtils.isNotEmpty(postpaidPlanRequest.getDistrictId())) {
                 builder = UriComponentsBuilder.fromHttpUrl(URL_DISTRICT).
                         queryParam("district_id", postpaidPlanRequest.getDistrictId());
