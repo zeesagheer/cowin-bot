@@ -39,6 +39,24 @@
 		</dependency>
 
 		<dependency>
+			<groupId>org.apache.xmlgraphics</groupId>
+			<artifactId>batik-transcoder</artifactId>
+			<version>1.7</version>
+		</dependency>
+
+		<dependency>
+			<groupId>org.apache.xmlgraphics</groupId>
+			<artifactId>batik-codec</artifactId>
+			<version>1.10</version>
+		</dependency>
+
+		<dependency>
+			<groupId>com.auth0</groupId>
+			<artifactId>java-jwt</artifactId>
+			<version>3.16.0</version>
+		</dependency>
+
+		<dependency>
 			<groupId>com.github.pengrad</groupId>
 			<artifactId>java-telegram-bot-api</artifactId>
 			<version>5.1.0</version>

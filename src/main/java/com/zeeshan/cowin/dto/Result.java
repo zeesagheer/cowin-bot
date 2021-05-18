@@ -2,6 +2,8 @@ package com.zeeshan.cowin.dto;
 
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 public class Result {
     private Long centerId;
@@ -16,5 +18,6 @@ public class Result {
     private String vaccine;
     private String pinCode;
     private String sessionId;
+    private List<String> slotsIntervals;
 
 }

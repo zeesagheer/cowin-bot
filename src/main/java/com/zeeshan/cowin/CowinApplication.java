@@ -5,9 +5,9 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.PropertyAccessor;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.pengrad.telegrambot.TelegramBot;
-import org.springframework.beans.factory.annotation.Qualifier;
+import com.pengrad.telegrambot.UpdatesListener;
+import com.zeeshan.cowin.service.TelegramBotService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -89,15 +89,17 @@ public class CowinApplication {
         objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         objectMapper.configure(DeserializationFeature.ACCEPT_SINGLE_VALUE_AS_ARRAY, true);
-//        objectMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
-//        objectMapper.setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.NONE);
         objectMapper.setVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY);
         return objectMapper;
     }
 
     @Bean
-    public TelegramBot getTelegramBot(@Value("${telegram.bot.token}") String token) {
+    public TelegramBot getTelegramBot(@Value("${telegram.bot.token}") String token, TelegramBotService telegramBotService) {
         TelegramBot telegramBot = new TelegramBot(token);
+        telegramBot.setUpdatesListener(updates -> {
+            updates.forEach(telegramBotService::executeAction);
+            return UpdatesListener.CONFIRMED_UPDATES_ALL;
+        });
         return telegramBot;
     }
 

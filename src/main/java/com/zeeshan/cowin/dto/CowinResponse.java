@@ -26,6 +26,7 @@ public class CowinResponse {
             private int available_capacity_dose1;
             private int available_capacity_dose2;
             private int min_age_limit;
+            private List<String> slots;
             private String vaccine; //COVAXIN
         }
 
