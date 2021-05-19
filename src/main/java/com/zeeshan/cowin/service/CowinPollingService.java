@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Component
@@ -39,17 +40,22 @@ public class CowinPollingService {
 
     Set<String> projectedSessions = new HashSet<>();
 
+    public static Map<String, Set<String>> districtPinCodeMap = new ConcurrentHashMap<>();
+
     @Scheduled(cron = "${poller.cron}")
     public void poll() {
         log.info("Start poll...");
-        Set<String> pinCodes = Collections.synchronizedSet(new HashSet<>());
+        Set<String> registeredPinCodes = new HashSet<>(TelegramBotServiceImpl.pinCodeRegistrationMap.keySet());
         TelegramBotServiceImpl.districtRegistrationMap.keySet()
                 .parallelStream()
                 .filter(districtId -> !TelegramBotServiceImpl.districtRegistrationMap.get(districtId).isEmpty())
                 .parallel()
-                .forEach(districtId -> pinCodes.addAll(fetchPlans(districtId, true)));
-        Set<String> registeredPinCodes = new HashSet<>(TelegramBotServiceImpl.districtRegistrationMap.keySet());
-        registeredPinCodes.removeAll(pinCodes);
+                .forEach(districtId -> {
+                    fetchPlans(districtId, true);
+                    if (districtPinCodeMap.containsKey(districtId)) {
+                        registeredPinCodes.removeAll(districtPinCodeMap.get(districtId));
+                    }
+                });
         registeredPinCodes.parallelStream()
                 .filter(pinCode -> !TelegramBotServiceImpl.pinCodeRegistrationMap.get(pinCode).isEmpty())
                 .parallel()
@@ -57,8 +63,7 @@ public class CowinPollingService {
         log.info("End poll...");
     }
 
-    public Set<String> fetchPlans(String query, boolean isDistrict) {
-        Set<String> pinCodesInDistrict = new HashSet<>();
+    public void fetchPlans(String query, boolean isDistrict) {
         try {
             PlanRequest planRequest = new PlanRequest();
             if (isDistrict) {
@@ -74,7 +79,9 @@ public class CowinPollingService {
             planRequest.setVaccineList(new HashSet<>(Arrays.asList("COVAXIN", "COVISHIELD")));
             planRequest.setSkipSessions(projectedSessions);
             List<Result> results = cowinService.getPlans(planRequest);
-            pinCodesInDistrict = planRequest.getPinCodesInDistrict();
+            if (isDistrict && !planRequest.getPinCodesInDistrict().isEmpty()) {
+                districtPinCodeMap.put(query, planRequest.getPinCodesInDistrict());
+            }
             log.info("Results : {}", results);
 
             Set<Long> chatIds = Collections.synchronizedSet(new HashSet<>());
@@ -93,7 +100,7 @@ public class CowinPollingService {
             });
             telegramBotService.sendToRegisteredUsers(chatIds, results);
 
-            results.forEach(result -> {
+            results.parallelStream().forEach(result -> {
                 String builder = resultConverter(result);
                 SendMessage message = new SendMessage(chatId, builder);
                 message.parseMode(ParseMode.Markdown);
@@ -106,7 +113,6 @@ public class CowinPollingService {
         } catch (IOException e) {
             log.error("Error while fetching slots", e);
         }
-        return pinCodesInDistrict;
     }
 
     public static String resultConverter(Result result) {

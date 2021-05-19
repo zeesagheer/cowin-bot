@@ -9,6 +9,7 @@ import com.pengrad.telegrambot.model.Message;
 import com.pengrad.telegrambot.model.MessageEntity;
 import com.pengrad.telegrambot.model.Update;
 import com.pengrad.telegrambot.model.request.KeyboardButton;
+import com.pengrad.telegrambot.model.request.ParseMode;
 import com.pengrad.telegrambot.model.request.ReplyKeyboardMarkup;
 import com.pengrad.telegrambot.request.SendMessage;
 import com.pengrad.telegrambot.request.SendPhoto;
@@ -69,20 +70,29 @@ public class TelegramBotServiceImpl implements TelegramBotService {
 
     @Override
     public void sendToRegisteredUsers(Set<Long> chatList, List<Result> results) {
-        chatList.parallelStream().map(userContextMap::get).parallel().forEach(userContext -> {
-            if (userContext.isSelectAnySlot()) {
-                sendMessage(userContext.getChatId(), resultConverter(results.get(0)));
-                try {
-                    userFlow(userContext, resultConverter(results.get(0)), null);
-                } catch (Exception e) {
-                    log.error("Exception occurred for user flow", e);
-                    sendMessage(userContext.getChatId(), "Error occurred for user flow");
+        if (!CollectionUtils.isEmpty(results)) {
+            chatList.parallelStream().map(userContextMap::get).parallel().forEach(userContext -> {
+                if (userContext.isSelectAnySlot()) {
+                    try {
+                        Result result = selectEligibleSlot(userContext, results);
+                        if (null != result) {
+                            sendMarkDownMessage(userContext.getChatId(), resultConverter(result));
+                            userFlow(userContext, resultConverter(results.get(0)), null);
+                        }
+                    } catch (Exception e) {
+                        log.error("Exception occurred for user flow", e);
+                        sendMarkDownMessage(userContext.getChatId(), "Error occurred for user flow");
+                    }
+                } else {
+                    results.parallelStream()
+                            .forEach(result -> sendMessage(userContext.getChatId(), resultConverter(result)));
                 }
-            } else {
-                results.parallelStream()
-                        .forEach(result -> sendMessage(userContext.getChatId(), resultConverter(result)));
-            }
-        });
+            });
+        }
+    }
+
+    private Result selectEligibleSlot(UserContext userContext, List<Result> results) {
+        userContext.getBeneficiarySelected()
     }
 
     @Override
@@ -94,14 +104,23 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             } catch (JsonProcessingException e) {
                 log.info(update.toString(), e);
             }
-            Long chatId = message.chat().id();
+            Long chatId;
+            if (null != update.myChatMember()) {
+                chatId = update.myChatMember().chat().id();
+                sendMarkDownMessage(chatId, "Welcome to chat *" + update.myChatMember().from().firstName() + "*");
+            } else {
+                chatId = message.chat().id();
+            }
             UserContext userContext = userContextMap.get(chatId);
             if (null == userContext) {
                 userContext = new UserContext();
                 userContextMap.put(chatId, userContext);
                 userContext.setChatId(chatId);
             }
-            stateMachineFlow(message, userContext);
+
+            if (null == update.myChatMember()) {
+                stateMachineFlow(message, userContext);
+            }
         } catch (
                 Exception e) {
             log.error("Exception occurred while sending message", e);
@@ -122,6 +141,7 @@ public class TelegramBotServiceImpl implements TelegramBotService {
     }
 
     public void commandExecutionFlow(UserContext userContext, String text) {
+        String action = userContext.getPreviousAction();
         if (userContext.getAction().equalsIgnoreCase("Command - setpreferredslot")) {
             if ("09:00AM-11:00AM".equalsIgnoreCase(text)) {
                 userContext.setDefaultSlot(1);
@@ -135,7 +155,6 @@ public class TelegramBotServiceImpl implements TelegramBotService {
                 userContext.setDefaultSlot(0);
             }
             sendMessage(userContext.getChatId(), "Slot set : " + text);
-            userContext.setAction(userContext.getPreviousAction());
         }
 
         if (userContext.getAction().equalsIgnoreCase("Command - setPincode")) {
@@ -143,7 +162,7 @@ public class TelegramBotServiceImpl implements TelegramBotService {
                 sendMessage(userContext.getChatId(), "You will receive updates for pincode : " + text);
                 userContext.setAction(userContext.getPreviousAction());
                 if (StringUtils.isNotEmpty(userContext.getSelectedPincode())) {
-                    Set<Long> registeredUsers = pinCodeRegistrationMap.get(text);
+                    Set<Long> registeredUsers = pinCodeRegistrationMap.get(userContext.getSelectedPincode());
                     if (null != registeredUsers) {
                         registeredUsers.remove(userContext.getChatId());
                     }
@@ -152,17 +171,18 @@ public class TelegramBotServiceImpl implements TelegramBotService {
                         .computeIfAbsent(text, k -> Collections.synchronizedSet(new HashSet<>()))
                         .add(userContext.getChatId());
                 userContext.setSelectedPincode(text);
+                userContext.setAction(userContext.getPreviousAction());
             } else {
                 sendMessage(userContext.getChatId(), "Enter valid pincode of 6 digits");
             }
         }
 
         if (userContext.getAction().equalsIgnoreCase("Command - setDistrict")) {
-            if (text.matches("^[0-9]$")) {
+            if (text.matches("^[0-9]+$")) {
                 sendMessage(userContext.getChatId(), "You will receive updates for District : " + text);
                 userContext.setAction(userContext.getPreviousAction());
                 if (StringUtils.isNotEmpty(userContext.getSelectedDistrictId())) {
-                    Set<Long> registeredUsers = districtRegistrationMap.get(text);
+                    Set<Long> registeredUsers = districtRegistrationMap.get(userContext.getSelectedDistrictId());
                     if (null != registeredUsers) {
                         registeredUsers.remove(userContext.getChatId());
                     }
@@ -171,6 +191,7 @@ public class TelegramBotServiceImpl implements TelegramBotService {
                         .computeIfAbsent(text, k -> Collections.synchronizedSet(new HashSet<>()))
                         .add(userContext.getChatId());
                 userContext.setSelectedDistrictId(text);
+                userContext.setAction(userContext.getPreviousAction());
             } else {
                 sendMessage(userContext.getChatId(), "Enter numeric value only");
             }
@@ -187,6 +208,8 @@ public class TelegramBotServiceImpl implements TelegramBotService {
                 sendMessage(userContext.getChatId(), "Enter true/false");
             }
         }
+
+        userContext.setAction(action);
 
     }
 
@@ -285,6 +308,7 @@ public class TelegramBotServiceImpl implements TelegramBotService {
                 action = "Select Beneficiary";
             } else {
                 userContext.setBeneficiarySelected(beneficiaries.get(0));
+                sendMessage(userContext.getChatId(), "Selected Beneficiary : " + beneficiaries.get(0).getName());
                 userContext.setAction("Send Captcha");
             }
         }
@@ -407,6 +431,12 @@ public class TelegramBotServiceImpl implements TelegramBotService {
 
     private SendResponse sendMessage(Long chatId, String message) {
         return telegramBot.execute(new SendMessage(chatId, message));
+    }
+
+    private SendResponse sendMarkDownMessage(Long chatId, String message) {
+        SendMessage sendMessage = new SendMessage(chatId, message);
+        sendMessage.parseMode(ParseMode.Markdown);
+        return telegramBot.execute(sendMessage);
     }
 
     private SendResponse sendMessage(Long chatId, String message, ReplyKeyboardMarkup replyKeyboardMarkup) {

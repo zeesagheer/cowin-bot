@@ -6,6 +6,7 @@ import com.zeeshan.cowin.dto.CowinResponse;
 import com.zeeshan.cowin.dto.PlanRequest;
 import com.zeeshan.cowin.dto.Result;
 import com.zeeshan.cowin.service.CowinService;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -42,7 +43,9 @@ public class CowinServiceImpl implements CowinService {
         List<Result> results = new ArrayList<>();
         if (response.getBody() != null) {
             List<CowinResponse.Centers> centers = response.getBody().getCenters();
+            if (StringUtils.isNotEmpty(planRequest.getDistrictId())) {
             centers.forEach(center -> planRequest.getPinCodesInDistrict().add(center.getPincode()));
+            }
             centers.stream().filter(center -> !planRequest.isOnlyFree() || FREE.equalsIgnoreCase(center.getFee_type()))
                     .forEach(center -> {
                         Map<String, String> priceMap = new HashMap<>();
