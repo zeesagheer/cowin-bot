@@ -42,6 +42,7 @@ public class CowinServiceImpl implements CowinService {
         List<Result> results = new ArrayList<>();
         if (response.getBody() != null) {
             List<CowinResponse.Centers> centers = response.getBody().getCenters();
+            centers.forEach(center -> planRequest.getPinCodesInDistrict().add(center.getPincode()));
             centers.stream().filter(center -> !planRequest.isOnlyFree() || FREE.equalsIgnoreCase(center.getFee_type()))
                     .forEach(center -> {
                         Map<String, String> priceMap = new HashMap<>();

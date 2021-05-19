@@ -20,6 +20,9 @@ public class UserContext {
     private String captcha;
     private int defaultSlot = 0;
     private String selectedSlot;
+    private String selectedPincode;
+    private String selectedDistrictId;
+    private boolean selectAnySlot;
     private String[] slots;
     private BeneficiariesResponse.Beneficiary beneficiarySelected;
     private List<BeneficiariesResponse.Beneficiary> beneficiaries;

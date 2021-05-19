@@ -14,4 +14,5 @@ public class PlanRequest {
     private boolean eighteenPlusOnly;
     private Set<String> vaccineList = new HashSet<>();
     private Set<String> skipSessions = new HashSet<>();
+    private Set<String> pinCodesInDistrict = new HashSet<>();
 }

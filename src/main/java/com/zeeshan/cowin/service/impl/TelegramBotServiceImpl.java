@@ -4,6 +4,7 @@ import com.auth0.jwt.JWT;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pengrad.telegrambot.TelegramBot;
+import com.pengrad.telegrambot.model.Contact;
 import com.pengrad.telegrambot.model.Message;
 import com.pengrad.telegrambot.model.MessageEntity;
 import com.pengrad.telegrambot.model.Update;
@@ -40,7 +41,9 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
+import static com.zeeshan.cowin.service.CowinPollingService.resultConverter;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 @Service
@@ -58,7 +61,29 @@ public class TelegramBotServiceImpl implements TelegramBotService {
     @Value("${telegram.bot.group.chat.id}")
     String chatId;
 
-    private Map<Long, UserContext> userContextMap = new HashMap<>();
+    public static Map<Long, UserContext> userContextMap = new HashMap<>();
+
+    public static Map<String, Set<Long>> pinCodeRegistrationMap = new ConcurrentHashMap<>();
+
+    public static Map<String, Set<Long>> districtRegistrationMap = new ConcurrentHashMap<>();
+
+    @Override
+    public void sendToRegisteredUsers(Set<Long> chatList, List<Result> results) {
+        chatList.parallelStream().map(userContextMap::get).parallel().forEach(userContext -> {
+            if (userContext.isSelectAnySlot()) {
+                sendMessage(userContext.getChatId(), resultConverter(results.get(0)));
+                try {
+                    userFlow(userContext, resultConverter(results.get(0)), null);
+                } catch (Exception e) {
+                    log.error("Exception occurred for user flow", e);
+                    sendMessage(userContext.getChatId(), "Error occurred for user flow");
+                }
+            } else {
+                results.parallelStream()
+                        .forEach(result -> sendMessage(userContext.getChatId(), resultConverter(result)));
+            }
+        });
+    }
 
     @Override
     public Boolean executeAction(Update update) {
@@ -76,45 +101,98 @@ public class TelegramBotServiceImpl implements TelegramBotService {
                 userContextMap.put(chatId, userContext);
                 userContext.setChatId(chatId);
             }
-            if (null != message.text() && message.text().startsWith("/") && Arrays.stream(message.entities())
-                    .anyMatch(entity -> MessageEntity.Type.bot_command.equals(entity.type()))) {
-                commandFlow(message);
-            } else if (userContext.getAction().startsWith("Command -")) {
-                commandExecutionFlow(message);
-            } else {
-                stateMachineFlow(message);
-            }
+            stateMachineFlow(message, userContext);
         } catch (
                 Exception e) {
-            log.error("Exception occured while sending message", e);
+            log.error("Exception occurred while sending message", e);
             return false;
         }
         return true;
     }
 
-    public void commandExecutionFlow(Message message) {
-        UserContext userContext = userContextMap.get(message.chat().id());
+    public void stateMachineFlow(Message message, UserContext userContext) throws IOException, TranscoderException {
+        if (null != message.entities() && Arrays.stream(message.entities())
+                .anyMatch(entity -> MessageEntity.Type.bot_command.equals(entity.type()))) {
+            commandFlow(userContext, message.text());
+        } else if (userContext.getAction().startsWith("Command -")) {
+            commandExecutionFlow(userContext, message.text());
+        } else {
+            userFlow(userContext, message.text(), message.contact());
+        }
+    }
+
+    public void commandExecutionFlow(UserContext userContext, String text) {
         if (userContext.getAction().equalsIgnoreCase("Command - setpreferredslot")) {
-            if ("09:00AM-11:00AM".equalsIgnoreCase(message.text())) {
+            if ("09:00AM-11:00AM".equalsIgnoreCase(text)) {
                 userContext.setDefaultSlot(1);
-            } else if ("11:00AM-01:00PM".equalsIgnoreCase(message.text())) {
+            } else if ("11:00AM-01:00PM".equalsIgnoreCase(text)) {
                 userContext.setDefaultSlot(2);
-            } else if ("01:00PM-03:00PM".equalsIgnoreCase(message.text())) {
+            } else if ("01:00PM-03:00PM".equalsIgnoreCase(text)) {
                 userContext.setDefaultSlot(3);
-            } else if ("03:00PM-05:00PM".equalsIgnoreCase(message.text())) {
+            } else if ("03:00PM-05:00PM".equalsIgnoreCase(text)) {
                 userContext.setDefaultSlot(4);
             } else {
                 userContext.setDefaultSlot(0);
             }
+            sendMessage(userContext.getChatId(), "Slot set : " + text);
             userContext.setAction(userContext.getPreviousAction());
+        }
+
+        if (userContext.getAction().equalsIgnoreCase("Command - setPincode")) {
+            if (text.matches("^[0-9]{1,6}$")) {
+                sendMessage(userContext.getChatId(), "You will receive updates for pincode : " + text);
+                userContext.setAction(userContext.getPreviousAction());
+                if (StringUtils.isNotEmpty(userContext.getSelectedPincode())) {
+                    Set<Long> registeredUsers = pinCodeRegistrationMap.get(text);
+                    if (null != registeredUsers) {
+                        registeredUsers.remove(userContext.getChatId());
+                    }
+                }
+                pinCodeRegistrationMap
+                        .computeIfAbsent(text, k -> Collections.synchronizedSet(new HashSet<>()))
+                        .add(userContext.getChatId());
+                userContext.setSelectedPincode(text);
+            } else {
+                sendMessage(userContext.getChatId(), "Enter valid pincode of 6 digits");
+            }
+        }
+
+        if (userContext.getAction().equalsIgnoreCase("Command - setDistrict")) {
+            if (text.matches("^[0-9]$")) {
+                sendMessage(userContext.getChatId(), "You will receive updates for District : " + text);
+                userContext.setAction(userContext.getPreviousAction());
+                if (StringUtils.isNotEmpty(userContext.getSelectedDistrictId())) {
+                    Set<Long> registeredUsers = districtRegistrationMap.get(text);
+                    if (null != registeredUsers) {
+                        registeredUsers.remove(userContext.getChatId());
+                    }
+                }
+                districtRegistrationMap
+                        .computeIfAbsent(text, k -> Collections.synchronizedSet(new HashSet<>()))
+                        .add(userContext.getChatId());
+                userContext.setSelectedDistrictId(text);
+            } else {
+                sendMessage(userContext.getChatId(), "Enter numeric value only");
+            }
+        }
+
+        if (userContext.getAction().equalsIgnoreCase("Command - enableAny")) {
+            if (Boolean.TRUE.toString().equalsIgnoreCase(text)) {
+                userContext.setSelectAnySlot(true);
+                sendMessage(userContext.getChatId(), "Enable Any slot selection set to " + true);
+            } else if (Boolean.FALSE.toString().equalsIgnoreCase(text)) {
+                userContext.setSelectAnySlot(false);
+                sendMessage(userContext.getChatId(), "Enable Any slot selection set to " + false);
+            } else {
+                sendMessage(userContext.getChatId(), "Enter true/false");
+            }
         }
 
     }
 
-    private void commandFlow(Message message) {
+    private void commandFlow(UserContext userContext, String text) {
         String action = null;
-        UserContext userContext = userContextMap.get(message.chat().id());
-        if (message.text().equalsIgnoreCase("/setpreferredslot")) {
+        if (text.equalsIgnoreCase("/setpreferredslot")) {
             KeyboardButton[] keyboardButtons = {
                     new KeyboardButton("09:00AM-11:00AM"),
                     new KeyboardButton("11:00AM-01:00PM"),
@@ -126,18 +204,35 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             sendMessage(userContext.getChatId(), "Enter phone number", replyKeyboardMarkup);
             action = "Command - setpreferredslot";
         }
+        if (text.equalsIgnoreCase("/setpincode")) {
+            sendMessage(userContext.getChatId(), "Enter valid pincode :\ncurrent value is " + userContext.getSelectedPincode());
+            action = "Command - setPincode";
+        }
+        if (text.equalsIgnoreCase("/setdistrict")) {
+            sendMessage(userContext.getChatId(), "Enter valid district id :\ncurrent value is " + userContext.getSelectedDistrictId());
+            action = "Command - setDistrict";
+        }
+        if (text.equalsIgnoreCase("/enableany")) {
+            KeyboardButton[] keyboardButtons = {
+                    new KeyboardButton("TRUE"),
+                    new KeyboardButton("FALSE")};
+            ReplyKeyboardMarkup replyKeyboardMarkup = new ReplyKeyboardMarkup(keyboardButtons);
+            replyKeyboardMarkup.resizeKeyboard(true);
+            replyKeyboardMarkup.oneTimeKeyboard(true);
+            sendMessage(userContext.getChatId(), "Enter phone number", replyKeyboardMarkup);
+            action = "Command - enableAny";
+        }
         if (null != action) {
             userContext.setPreviousAction(userContext.getAction());
             userContext.setAction(action);
         }
     }
 
-    public void stateMachineFlow(Message message) throws IOException, TranscoderException {
-        UserContext userContext = userContextMap.get(message.chat().id());
+    public void userFlow(UserContext userContext, String text, Contact contact) throws IOException, TranscoderException {
         String action = null;
-        if (null != message.text() && message.text().contains("SessionId")) {
+        if (null != text && text.contains("SessionId")) {
             userContext.setAction(Strings.EMPTY);
-            String[] tokens = message.text().split("\\$");
+            String[] tokens = text.split("\\$");
             userContext.setSessionId(tokens[tokens.length - 1]);
             userContext.setCenterId(tokens[tokens.length - 2]);
             userContext.setSlots(tokens[tokens.length - 3].split(","));
@@ -156,10 +251,10 @@ public class TelegramBotServiceImpl implements TelegramBotService {
         }
         if ("Enter phone number".equalsIgnoreCase(userContext.getAction())) {
             String mobile;
-            if (null != message.contact()) {
-                mobile = message.contact().phoneNumber().substring(2);
+            if (null != contact) {
+                mobile = contact.phoneNumber().substring(2);
             } else {
-                mobile = message.text();
+                mobile = text;
             }
             log.info(mobile);
             userContext.setMobile(mobile);
@@ -167,7 +262,7 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             action = "Enter Otp";
         }
         if ("Enter Otp".equalsIgnoreCase(userContext.getAction())) {
-            String otp = message.text();
+            String otp = text;
             VerifyOtpRequest verifyOtpRequest = new VerifyOtpRequest();
             verifyOtpRequest.setTxnId(userContext.getTxnId());
             verifyOtpRequest.setOtp(DigestUtils.sha256Hex(otp));
@@ -195,7 +290,7 @@ public class TelegramBotServiceImpl implements TelegramBotService {
         }
         if ("Select Beneficiary".equalsIgnoreCase(userContext.getAction())) {
             Optional<BeneficiariesResponse.Beneficiary> optionalBeneficiary = userContext.getBeneficiaries().stream()
-                    .filter(ben -> ben.getName().equalsIgnoreCase(message.text()))
+                    .filter(ben -> ben.getName().equalsIgnoreCase(text))
                     .findAny();
             if (optionalBeneficiary.isPresent()) {
                 userContext.setBeneficiarySelected(optionalBeneficiary.get());
@@ -210,7 +305,7 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             action = "Enter Captcha";
         }
         if ("Enter Captcha".equalsIgnoreCase(userContext.getAction())) {
-            userContext.setCaptcha(message.text());
+            userContext.setCaptcha(text);
             if (userContext.getDefaultSlot() > 0
                     && userContext.getDefaultSlot() <= userContext.getSlots().length) {
                 userContext.setAction("Schedule Appointment");
@@ -230,7 +325,7 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             action = "Select Slot";
         }
         if ("Select Slot".equalsIgnoreCase(userContext.getAction())) {
-            userContext.setSelectedSlot(message.text().substring(1));
+            userContext.setSelectedSlot(text.substring(1));
             userContext.setAction("Schedule Appointment");
         }
         if ("Schedule Appointment".equalsIgnoreCase(userContext.getAction())
