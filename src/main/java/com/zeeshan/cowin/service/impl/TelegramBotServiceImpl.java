@@ -88,12 +88,10 @@ public class TelegramBotServiceImpl implements TelegramBotService {
                                 result = optionalResult.get();
                             } else if (!preferredVaccine.isEmpty()) {
                                 result = preferredVaccine.get(0);
-                            } else if (!selectEligibleSlots.isEmpty()) {
-                                result = selectEligibleSlots.get(0);
                             }
                             if (result != null) {
                                 sendMarkDownMessage(userContext.getChatId(), resultConverter(result));
-                                userFlow(userContext, resultConverter(results.get(0)), null);
+                                userFlow(userContext, resultConverter(result), null);
                             } else {
                                 selectEligibleSlots.parallelStream()
                                         .forEach(r -> sendMarkDownMessage(userContext.getChatId(), resultConverter(r)));
@@ -365,6 +363,7 @@ public class TelegramBotServiceImpl implements TelegramBotService {
                 }
             } else {
                 sendMessage(userContext.getChatId(), otpResponse.getError());
+                sendMessage(userContext.getChatId(), "Enter otp again");
                 action = "Enter Otp";
             }
         }

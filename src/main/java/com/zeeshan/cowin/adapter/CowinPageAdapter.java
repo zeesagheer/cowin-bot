@@ -101,7 +101,6 @@ public class CowinPageAdapter {
             headers.set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36");
             headers.setBearerAuth(token);
             HttpEntity<CowinResponse> request = new HttpEntity<>(headers);
-            log.info("Logging response for book slot : " + request);
             return restTemplate.exchange(URL_BENIFECIARIES, HttpMethod.GET, request, BeneficiariesResponse.class);
         } catch (HttpStatusCodeException e) {
             String responseString = e.getResponseBodyAsString();
@@ -140,6 +139,7 @@ public class CowinPageAdapter {
             headers.set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36");
             headers.setBearerAuth(token);
             HttpEntity<ScheduleRequest> request = new HttpEntity<>(scheduleRequest, headers);
+            log.info("Logging response for book slot : " + request);
             return restTemplate.exchange(URL_SCHEDULE, HttpMethod.POST, request, ScheduleResponse.class);
         } catch (HttpStatusCodeException e) {
             String responseString = e.getResponseBodyAsString();
