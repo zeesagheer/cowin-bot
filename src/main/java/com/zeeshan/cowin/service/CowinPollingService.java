@@ -107,6 +107,7 @@ public class CowinPollingService {
                 "\n*Address :* " + result.getAddress() +
                 "\n*Dose1 :* " + result.getDose1() +
                 "  *Dose2 :* " + result.getDose2() +
+                "\n*Pincode :* " + result.getPinCode() +
                 "\n*Vaccine :* " + result.getVaccine() +
                 "\n*Age :* " + result.getAge() +
                 "\n*Date :* " + result.getDate() +
