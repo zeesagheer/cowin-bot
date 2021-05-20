@@ -1,9 +1,7 @@
 package com.zeeshan.cowin.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pengrad.telegrambot.TelegramBot;
-import com.pengrad.telegrambot.model.request.ParseMode;
-import com.pengrad.telegrambot.request.SendMessage;
-import com.pengrad.telegrambot.response.SendResponse;
 import com.zeeshan.cowin.adapter.TelegramBotAdapter;
 import com.zeeshan.cowin.dto.PlanRequest;
 import com.zeeshan.cowin.dto.Result;
@@ -34,6 +32,9 @@ public class CowinPollingService {
 
     @Autowired
     TelegramBotService telegramBotService;
+
+    @Autowired
+    ObjectMapper mapper;
 
     @Value("${telegram.bot.group.chat.id}")
     String chatId;
@@ -78,7 +79,7 @@ public class CowinPollingService {
             if (isDistrict && !planRequest.getPinCodesInDistrict().isEmpty()) {
                 districtPinCodeMap.put(query, planRequest.getPinCodesInDistrict());
             }
-            log.info("Results : {}", results);
+            log.info("Results for {}-{} : {}", isDistrict ? "district" : "pincode", query, mapper.writeValueAsString(results));
 
             Set<Long> chatIds = Collections.synchronizedSet(new HashSet<>());
             if (isDistrict && null != TelegramBotServiceImpl.districtRegistrationMap.get(query)) {
@@ -103,7 +104,7 @@ public class CowinPollingService {
     }
 
     public static String resultConverter(Result result) {
-        String builder = "*Name :* " + result.getName() +
+        return "*Name :* " + result.getName() +
                 "\n*Address :* " + result.getAddress() +
                 "\n*Dose1 :* " + result.getDose1() +
                 "  *Dose2 :* " + result.getDose2() +
@@ -113,7 +114,6 @@ public class CowinPollingService {
                 "\n*Date :* " + result.getDate() +
                 "\n*Fees :* " + result.getFees() +
                 "\n*SessionId :*$ " + result.getSlotsIntervals() + "$" + result.getCenterId() + "$" + result.getSessionId();
-        return builder;
     }
 
 }

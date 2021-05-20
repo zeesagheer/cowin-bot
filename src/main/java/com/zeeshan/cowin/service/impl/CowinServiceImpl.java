@@ -6,6 +6,7 @@ import com.zeeshan.cowin.dto.CowinResponse;
 import com.zeeshan.cowin.dto.PlanRequest;
 import com.zeeshan.cowin.dto.Result;
 import com.zeeshan.cowin.service.CowinService;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +23,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 public class CowinServiceImpl implements CowinService {
 
 
@@ -46,22 +48,19 @@ public class CowinServiceImpl implements CowinService {
             if (StringUtils.isNotEmpty(planRequest.getDistrictId())) {
                 centers.forEach(center -> planRequest.getPinCodesInDistrict().add(center.getPincode()));
             }
-            centers.stream()
-                    .forEach(center -> {
-                        Map<String, String> priceMap = new HashMap<>();
-                        if (null != center.getVaccine_fees()) {
-                            priceMap.putAll(center.getVaccine_fees().stream()
-                                    .collect(Collectors
-                                            .toMap(CowinResponse.Centers.Vaccine::getVaccine,
-                                                    CowinResponse.Centers.Vaccine::getFee)));
-                        }
-                        center.getSessions().stream()
-                                .filter(session -> !planRequest.getSkipSessions().contains(session.getSession_id()))
-                                .filter(session -> session.getAvailable_capacity() > 0)
-                                .forEach(session -> {
-                                    results.add(convert(center, priceMap, session));
-                                });
-                    });
+            centers.forEach(center -> {
+                Map<String, String> priceMap = new HashMap<>();
+                if (null != center.getVaccine_fees()) {
+                    priceMap.putAll(center.getVaccine_fees().stream()
+                            .collect(Collectors
+                                    .toMap(CowinResponse.Centers.Vaccine::getVaccine,
+                                            CowinResponse.Centers.Vaccine::getFee)));
+                }
+                center.getSessions().stream()
+                        .filter(session -> !planRequest.getSkipSessions().contains(session.getSession_id()))
+                        .filter(session -> session.getAvailable_capacity() > 0)
+                        .forEach(session -> results.add(convert(center, priceMap, session)));
+            });
         }
         return results;
     }
