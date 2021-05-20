@@ -44,9 +44,9 @@ public class CowinServiceImpl implements CowinService {
         if (response.getBody() != null) {
             List<CowinResponse.Centers> centers = response.getBody().getCenters();
             if (StringUtils.isNotEmpty(planRequest.getDistrictId())) {
-            centers.forEach(center -> planRequest.getPinCodesInDistrict().add(center.getPincode()));
+                centers.forEach(center -> planRequest.getPinCodesInDistrict().add(center.getPincode()));
             }
-            centers.stream().filter(center -> !planRequest.isOnlyFree() || FREE.equalsIgnoreCase(center.getFee_type()))
+            centers.stream()
                     .forEach(center -> {
                         Map<String, String> priceMap = new HashMap<>();
                         if (null != center.getVaccine_fees()) {
@@ -57,10 +57,7 @@ public class CowinServiceImpl implements CowinService {
                         }
                         center.getSessions().stream()
                                 .filter(session -> !planRequest.getSkipSessions().contains(session.getSession_id()))
-                                .filter(session -> session.getAvailable_capacity() > 0 && (null == planRequest.getDose1()
-                                        || (planRequest.getDose1() ? session.getAvailable_capacity_dose1() > 0 : session.getAvailable_capacity_dose2() > 0)))
-                                .filter(session -> !planRequest.isEighteenPlusOnly() || session.getMin_age_limit() == 18)
-                                .filter(session -> planRequest.getVaccineList().isEmpty() || planRequest.getVaccineList().contains(session.getVaccine()))
+                                .filter(session -> session.getAvailable_capacity() > 0)
                                 .forEach(session -> {
                                     results.add(convert(center, priceMap, session));
                                 });

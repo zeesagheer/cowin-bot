@@ -16,6 +16,7 @@ public class UserContext {
     private String centerId;
     private String referenceId;
     private String action = Strings.EMPTY;
+    private String endAction = Strings.EMPTY;
     private String previousAction = Strings.EMPTY;
     private String captcha;
     private int defaultSlot = 0;
@@ -24,6 +25,7 @@ public class UserContext {
     private String selectedDistrictId;
     private boolean selectAnySlot;
     private String[] slots;
+    private List<String> preferredVaccine;
     private BeneficiariesResponse.Beneficiary beneficiarySelected;
     private List<BeneficiariesResponse.Beneficiary> beneficiaries;
 }

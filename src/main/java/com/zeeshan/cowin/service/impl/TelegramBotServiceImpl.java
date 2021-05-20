@@ -43,6 +43,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 import static com.zeeshan.cowin.service.CowinPollingService.resultConverter;
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -74,25 +75,52 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             chatList.parallelStream().map(userContextMap::get).parallel().forEach(userContext -> {
                 if (userContext.isSelectAnySlot()) {
                     try {
-                        Result result = selectEligibleSlot(userContext, results);
-                        if (null != result) {
-                            sendMarkDownMessage(userContext.getChatId(), resultConverter(result));
-                            userFlow(userContext, resultConverter(results.get(0)), null);
+                        List<Result> selectEligibleSlots = selectEligibleSlots(userContext, results);
+                        if (!CollectionUtils.isEmpty(selectEligibleSlots)) {
+                            List<Result> preferredVaccine = selectEligibleSlots.stream()
+                                    .filter(slot -> CollectionUtils.isEmpty(userContext.getPreferredVaccine())
+                                            || userContext.getPreferredVaccine().contains(slot.getVaccine().toUpperCase()))
+                                    .collect(Collectors.toList());
+                            Optional<Result> optionalResult = preferredVaccine.stream()
+                                    .filter(slot -> slot.getPinCode().equalsIgnoreCase(userContext.getSelectedPincode())).findAny();
+                            Result result = null;
+                            if (optionalResult.isPresent()) {
+                                result = optionalResult.get();
+                            } else if (!preferredVaccine.isEmpty()) {
+                                result = preferredVaccine.get(0);
+                            } else if (!selectEligibleSlots.isEmpty()) {
+                                result = selectEligibleSlots.get(0);
+                            }
+                            if (result != null) {
+                                sendMarkDownMessage(userContext.getChatId(), resultConverter(result));
+                                userFlow(userContext, resultConverter(results.get(0)), null);
+                            } else {
+                                selectEligibleSlots.parallelStream()
+                                        .forEach(r -> sendMarkDownMessage(userContext.getChatId(), resultConverter(r)));
+                            }
                         }
                     } catch (Exception e) {
                         log.error("Exception occurred for user flow", e);
-                        sendMarkDownMessage(userContext.getChatId(), "Error occurred for user flow");
+                        sendMessage(userContext.getChatId(), "Error occurred for user flow");
                     }
                 } else {
                     results.parallelStream()
-                            .forEach(result -> sendMessage(userContext.getChatId(), resultConverter(result)));
+                            .forEach(result -> sendMarkDownMessage(userContext.getChatId(), resultConverter(result)));
                 }
             });
         }
     }
 
-    private Result selectEligibleSlot(UserContext userContext, List<Result> results) {
-        userContext.getBeneficiarySelected()
+    private List<Result> selectEligibleSlots(UserContext userContext, List<Result> results) {
+        if (null != userContext.getBeneficiarySelected()) {
+            return results.stream().filter(r -> null != userContext.getBeneficiarySelected().getBirth_year()
+                    && ((r.getAge() == 18 && 2021 - Integer.parseInt(userContext.getBeneficiarySelected().getBirth_year()) < 45)
+                    || r.getAge() == 45 && 2021 - Integer.parseInt(userContext.getBeneficiarySelected().getBirth_year()) >= 45))
+                    .filter(r -> (r.getDose1() > 0 && StringUtils.isEmpty(userContext.getBeneficiarySelected().getDose1_date()))
+                            || (r.getDose2() > 0 && StringUtils.isNotEmpty(userContext.getBeneficiarySelected().getDose1_date())))
+                    .collect(Collectors.toList());
+        }
+        return null;
     }
 
     @Override
@@ -209,11 +237,21 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             }
         }
 
+        if (userContext.getAction().equalsIgnoreCase("Command - selectVaccine")) {
+            if ("COVAXIN".equalsIgnoreCase(text) || "COVISHIELD".equalsIgnoreCase(text)) {
+                userContext.setPreferredVaccine(Collections.singletonList(text.toUpperCase()));
+                sendMessage(userContext.getChatId(), "Vaccine selected " + text.toUpperCase());
+            } else {
+                userContext.setPreferredVaccine(null);
+                sendMessage(userContext.getChatId(), "No preference selected");
+            }
+        }
+
         userContext.setAction(action);
 
     }
 
-    private void commandFlow(UserContext userContext, String text) {
+    private void commandFlow(UserContext userContext, String text) throws IOException, TranscoderException {
         String action = null;
         if (text.equalsIgnoreCase("/setpreferredslot")) {
             KeyboardButton[] keyboardButtons = {
@@ -235,6 +273,15 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             sendMessage(userContext.getChatId(), "Enter valid district id :\ncurrent value is " + userContext.getSelectedDistrictId());
             action = "Command - setDistrict";
         }
+        if (text.equalsIgnoreCase("/choosebeneficiary")) {
+            userContext.setAction("Start journey");
+            userFlow(userContext, null, null);
+        }
+        if (text.equalsIgnoreCase("/updatemobile")) {
+            enterPhoneNo(userContext);
+            userContext.setAction("Enter phone number");
+            userContext.setEndAction("Enter Otp");
+        }
         if (text.equalsIgnoreCase("/enableany")) {
             KeyboardButton[] keyboardButtons = {
                     new KeyboardButton("TRUE"),
@@ -242,8 +289,20 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             ReplyKeyboardMarkup replyKeyboardMarkup = new ReplyKeyboardMarkup(keyboardButtons);
             replyKeyboardMarkup.resizeKeyboard(true);
             replyKeyboardMarkup.oneTimeKeyboard(true);
-            sendMessage(userContext.getChatId(), "Enter phone number", replyKeyboardMarkup);
+            sendMessage(userContext.getChatId(), "Slots will be selected automatically once available," +
+                    "do you want to enable/disable this feature ? \nCurrent preference :" + userContext.isSelectAnySlot(), replyKeyboardMarkup);
             action = "Command - enableAny";
+        }
+        if (text.equalsIgnoreCase("/selectvaccine")) {
+            KeyboardButton[] keyboardButtons = {
+                    new KeyboardButton("COVAXIN"),
+                    new KeyboardButton("COVISHIELD"),
+                    new KeyboardButton("No Preference")};
+            ReplyKeyboardMarkup replyKeyboardMarkup = new ReplyKeyboardMarkup(keyboardButtons);
+            replyKeyboardMarkup.resizeKeyboard(true);
+            replyKeyboardMarkup.oneTimeKeyboard(true);
+            sendMessage(userContext.getChatId(), "Choose Vaccine preference\nCurrent preference :" + userContext.getPreferredVaccine(), replyKeyboardMarkup);
+            action = "Command - selectVaccine";
         }
         if (null != action) {
             userContext.setPreviousAction(userContext.getAction());
@@ -262,6 +321,9 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             if (userContext.getDefaultSlot() > 0 && userContext.getDefaultSlot() <= tokens.length) {
                 userContext.setSelectedSlot(tokens[userContext.getDefaultSlot() - 1].substring(1));
             }
+            userContext.setAction("Start journey");
+        }
+        if ("Start journey".equalsIgnoreCase(userContext.getAction())) {
             if (StringUtils.isNotEmpty(userContext.getToken()) && verifyToken(userContext.getToken())) {
                 userContext.setAction("Choose Beneficiary");
             } else if (StringUtils.isNotEmpty(userContext.getMobile())) {
@@ -289,8 +351,22 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             VerifyOtpRequest verifyOtpRequest = new VerifyOtpRequest();
             verifyOtpRequest.setTxnId(userContext.getTxnId());
             verifyOtpRequest.setOtp(DigestUtils.sha256Hex(otp));
-            userContext.setToken(cowin.verifyOTP(verifyOtpRequest).getBody().getToken());
-            userContext.setAction("Choose Beneficiary");
+            VerifyOtpResponse otpResponse = cowin.verifyOTP(verifyOtpRequest).getBody();
+            if (StringUtils.isEmpty(otpResponse.getErrorCode())
+                    && StringUtils.isNotEmpty(otpResponse.getToken())) {
+                userContext.setToken(otpResponse.getToken());
+                sendMessage(userContext.getChatId(), "Authenticated");
+                if ("Enter Otp".equalsIgnoreCase(userContext.getEndAction())) {
+                    userContext.setAction(Strings.EMPTY);
+                    userContext.setEndAction(Strings.EMPTY);
+                    action = null;
+                } else {
+                    userContext.setAction("Choose Beneficiary");
+                }
+            } else {
+                sendMessage(userContext.getChatId(), otpResponse.getError());
+                action = "Enter Otp";
+            }
         }
         if ("Choose Beneficiary".equalsIgnoreCase(userContext.getAction())) {
             List<BeneficiariesResponse.Beneficiary> beneficiaries = userContext.getBeneficiaries();
@@ -325,8 +401,14 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             }
         }
         if ("Send Captcha".equalsIgnoreCase(userContext.getAction())) {
-            sendCaptcha(userContext);
-            action = "Enter Captcha";
+            if (null != userContext.getBeneficiarySelected()
+                    && StringUtils.isNotEmpty(userContext.getSessionId())) {
+                sendCaptcha(userContext);
+                action = "Enter Captcha";
+            } else {
+                userContext.setAction(Strings.EMPTY);
+                action = null;
+            }
         }
         if ("Enter Captcha".equalsIgnoreCase(userContext.getAction())) {
             userContext.setCaptcha(text);
@@ -358,7 +440,7 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             ScheduleRequest scheduleRequest = new ScheduleRequest();
             scheduleRequest.setBeneficiaries(Collections.singletonList(userContext.getBeneficiarySelected().getBeneficiary_reference_id()));
             scheduleRequest.setCaptcha(userContext.getCaptcha());
-            scheduleRequest.setDose(null == userContext.getBeneficiarySelected().getDose1_date() ? 1 : 2);
+            scheduleRequest.setDose(StringUtils.isEmpty(userContext.getBeneficiarySelected().getDose1_date()) ? 1 : 2);
             scheduleRequest.setSession_id(userContext.getSessionId());
             scheduleRequest.setSlot(userContext.getSelectedSlot().substring(1));
             scheduleRequest.setCenter_id(Integer.parseInt(userContext.getCenterId()));
@@ -368,6 +450,10 @@ public class TelegramBotServiceImpl implements TelegramBotService {
                 if ("APPOIN0045".equalsIgnoreCase(response.getErrorCode())) {
                     sendCaptcha(userContext);
                     action = "Enter Captcha";
+                } else {
+                    userContext.setSessionId(Strings.EMPTY);
+                    userContext.setAction(Strings.EMPTY);
+                    action = null;
                 }
             } else {
                 sendMessage(userContext.getChatId(), "Booked Successfully!");

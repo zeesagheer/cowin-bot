@@ -73,10 +73,6 @@ public class CowinPollingService {
                 planRequest.setPinCode(query);
                 log.info("Call for pincode {}", query);
             }
-            planRequest.setOnlyFree(false);
-            planRequest.setEighteenPlusOnly(false);
-            planRequest.setDose1(null);
-            planRequest.setVaccineList(new HashSet<>(Arrays.asList("COVAXIN", "COVISHIELD")));
             planRequest.setSkipSessions(projectedSessions);
             List<Result> results = cowinService.getPlans(planRequest);
             if (isDistrict && !planRequest.getPinCodesInDistrict().isEmpty()) {
@@ -98,18 +94,9 @@ public class CowinPollingService {
                 telegramBotService.sendToRegisteredUsers(registeredUsers, resultList);
                 chatIds.removeAll(registeredUsers);
             });
+            results.parallelStream().map(Result::getSessionId).forEach(projectedSessions::add);
             telegramBotService.sendToRegisteredUsers(chatIds, results);
 
-            results.parallelStream().forEach(result -> {
-                String builder = resultConverter(result);
-                SendMessage message = new SendMessage(chatId, builder);
-                message.parseMode(ParseMode.Markdown);
-                SendResponse sendResponse = telegramBot.execute(message);
-                if (sendResponse.isOk()) {
-                    projectedSessions.add(result.getSessionId());
-                }
-                log.info("ok={}, error_code={}, description={}, parameters={}", sendResponse.isOk(), sendResponse.errorCode(), sendResponse.description(), sendResponse.parameters());
-            });
         } catch (IOException e) {
             log.error("Error while fetching slots", e);
         }
@@ -120,6 +107,7 @@ public class CowinPollingService {
                 "\n*Address :* " + result.getAddress() +
                 "\n*Dose1 :* " + result.getDose1() +
                 "  *Dose2 :* " + result.getDose2() +
+                "\n*Vaccine :* " + result.getVaccine() +
                 "\n*Age :* " + result.getAge() +
                 "\n*Date :* " + result.getDate() +
                 "\n*Fees :* " + result.getFees() +
