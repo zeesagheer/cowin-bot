@@ -39,6 +39,9 @@ public class CowinPageAdapter {
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("Accept", "*/*");
             headers.set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36");
+            if (StringUtils.isNotEmpty(postpaidPlanRequest.getToken())) {
+                headers.setBearerAuth(postpaidPlanRequest.getToken());
+            }
             if (StringUtils.isNotEmpty(postpaidPlanRequest.getDistrictId())) {
                 builder = UriComponentsBuilder.fromHttpUrl(URL_DISTRICT).
                         queryParam("district_id", postpaidPlanRequest.getDistrictId());

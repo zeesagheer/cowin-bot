@@ -28,4 +28,6 @@ public class UserContext {
     private List<String> preferredVaccine;
     private BeneficiariesResponse.Beneficiary beneficiarySelected;
     private List<BeneficiariesResponse.Beneficiary> beneficiaries;
+    private boolean isAdmin;
+    private Long otpSentTime;
 }

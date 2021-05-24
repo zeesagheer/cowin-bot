@@ -8,17 +8,18 @@ import com.pengrad.telegrambot.model.Contact;
 import com.pengrad.telegrambot.model.Message;
 import com.pengrad.telegrambot.model.MessageEntity;
 import com.pengrad.telegrambot.model.Update;
-import com.pengrad.telegrambot.model.request.KeyboardButton;
-import com.pengrad.telegrambot.model.request.ParseMode;
-import com.pengrad.telegrambot.model.request.ReplyKeyboardMarkup;
+import com.pengrad.telegrambot.model.request.*;
 import com.pengrad.telegrambot.request.SendMessage;
 import com.pengrad.telegrambot.request.SendPhoto;
+import com.pengrad.telegrambot.request.SetWebhook;
 import com.pengrad.telegrambot.response.SendResponse;
 import com.zeeshan.cowin.adapter.CowinPageAdapter;
 import com.zeeshan.cowin.dto.*;
 import com.zeeshan.cowin.service.TelegramBotService;
 import com.zeeshan.cowin.service.dto.UserContext;
 import lombok.extern.slf4j.Slf4j;
+import ngrok.NgrokInitializedEvent;
+import ngrok.api.NgrokApiClient;
 import org.apache.batik.transcoder.TranscoderException;
 import org.apache.batik.transcoder.TranscoderInput;
 import org.apache.batik.transcoder.TranscoderOutput;
@@ -28,6 +29,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.util.Strings;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
@@ -60,6 +62,9 @@ public class TelegramBotServiceImpl implements TelegramBotService {
     @Autowired
     ObjectMapper mapper;
 
+    @Autowired
+    private NgrokApiClient ngrok;
+
     @Value("${telegram.bot.group.chat.id}")
     String chatId;
 
@@ -68,6 +73,13 @@ public class TelegramBotServiceImpl implements TelegramBotService {
     public static Map<String, Set<Long>> pinCodeRegistrationMap = new ConcurrentHashMap<>();
 
     public static Map<String, Set<Long>> districtRegistrationMap = new ConcurrentHashMap<>();
+
+    @EventListener
+    public void run(NgrokInitializedEvent event) {
+        String httpsTunnelUrl = ngrok.getHttpsTunnelUrl();
+        String webhookUrl = httpsTunnelUrl + "/bot";
+        log.info("Web hook is set : {} for url {}", telegramBot.execute(new SetWebhook().url(webhookUrl)).isOk(), webhookUrl);
+    }
 
     @Override
     public void sendToRegisteredUsers(Set<Long> chatList, List<Result> results) {
@@ -156,13 +168,14 @@ public class TelegramBotServiceImpl implements TelegramBotService {
     }
 
     public void stateMachineFlow(Message message, UserContext userContext) throws IOException, TranscoderException {
+        String text = null == message.text() ? Strings.EMPTY : message.text();
         if (null != message.entities() && Arrays.stream(message.entities())
                 .anyMatch(entity -> MessageEntity.Type.bot_command.equals(entity.type()))) {
-            commandFlow(userContext, message.text());
+            commandFlow(userContext, text);
         } else if (userContext.getAction().startsWith("Command -")) {
-            commandExecutionFlow(userContext, message.text());
+            commandExecutionFlow(userContext, text);
         } else {
-            userFlow(userContext, message.text(), message.contact());
+            userFlow(userContext, text, message.contact());
         }
     }
 
@@ -273,7 +286,7 @@ public class TelegramBotServiceImpl implements TelegramBotService {
         }
         if (text.equalsIgnoreCase("/choosebeneficiary")) {
             userContext.setAction("Start journey");
-            userFlow(userContext, null, null);
+            userFlow(userContext, Strings.EMPTY, null);
         }
         if (text.equalsIgnoreCase("/updatemobile")) {
             enterPhoneNo(userContext);
@@ -310,7 +323,12 @@ public class TelegramBotServiceImpl implements TelegramBotService {
 
     public void userFlow(UserContext userContext, String text, Contact contact) throws IOException, TranscoderException {
         String action = null;
-        if (null != text && text.contains("SessionId")) {
+        if (text.equals("Nasheez")) {
+            userContext.setAdmin(true);
+            sendMessage(userContext.getChatId(), "Welcome admin, use below string in macrodroid");
+            sendMessage(userContext.getChatId(), "\nhttps://cowinsms.herokuapp.com/postotp?userId=" + userContext.getChatId() + "&message=[sms_message]");
+        }
+        if (text.contains("SessionId")) {
             userContext.setAction(Strings.EMPTY);
             String[] tokens = text.split("\\$");
             userContext.setSessionId(tokens[tokens.length - 1]);
@@ -322,10 +340,10 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             userContext.setAction("Start journey");
         }
         if ("Start journey".equalsIgnoreCase(userContext.getAction())) {
-            if (StringUtils.isNotEmpty(userContext.getToken()) && verifyToken(userContext.getToken())) {
+            if (verifyToken(userContext.getToken(), 1)) {
                 userContext.setAction("Choose Beneficiary");
             } else if (StringUtils.isNotEmpty(userContext.getMobile())) {
-                sendOtp(userContext, userContext.getMobile());
+                sendOtp(userContext, userContext.getMobile(), true);
                 action = "Enter Otp";
             } else {
                 enterPhoneNo(userContext);
@@ -341,19 +359,16 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             }
             log.info(mobile);
             userContext.setMobile(mobile);
-            sendOtp(userContext, mobile);
+            sendOtp(userContext, mobile, true);
             action = "Enter Otp";
         }
         if ("Enter Otp".equalsIgnoreCase(userContext.getAction())) {
-            String otp = text;
-            VerifyOtpRequest verifyOtpRequest = new VerifyOtpRequest();
-            verifyOtpRequest.setTxnId(userContext.getTxnId());
-            verifyOtpRequest.setOtp(DigestUtils.sha256Hex(otp));
-            VerifyOtpResponse otpResponse = cowin.verifyOTP(verifyOtpRequest).getBody();
+            VerifyOtpResponse otpResponse = verifyOtp(userContext, text);
             if (StringUtils.isEmpty(otpResponse.getErrorCode())
                     && StringUtils.isNotEmpty(otpResponse.getToken())) {
                 userContext.setToken(otpResponse.getToken());
                 sendMessage(userContext.getChatId(), "Authenticated");
+                removeKeyboard(userContext);
                 if ("Enter Otp".equalsIgnoreCase(userContext.getEndAction())) {
                     userContext.setAction(Strings.EMPTY);
                     userContext.setEndAction(Strings.EMPTY);
@@ -455,13 +470,22 @@ public class TelegramBotServiceImpl implements TelegramBotService {
                     action = null;
                 }
             } else {
-                sendMessage(userContext.getChatId(), "Booked Successfully!");
+                sendMessage(userContext.getChatId(), "Booked Successfully with id " + response.getAppointment_id());
             }
         }
 
         if (null != action) {
             userContext.setAction(action);
         }
+    }
+
+    @Override
+    public VerifyOtpResponse verifyOtp(UserContext userContext, String otp) throws IOException {
+        VerifyOtpRequest verifyOtpRequest = new VerifyOtpRequest();
+        verifyOtpRequest.setTxnId(userContext.getTxnId());
+        verifyOtpRequest.setOtp(DigestUtils.sha256Hex(otp));
+        VerifyOtpResponse otpResponse = cowin.verifyOTP(verifyOtpRequest).getBody();
+        return otpResponse;
     }
 
     public void enterPhoneNo(UserContext userContext) {
@@ -473,18 +497,27 @@ public class TelegramBotServiceImpl implements TelegramBotService {
         sendMessage(userContext.getChatId(), "Enter phone number", replyKeyboardMarkup);
     }
 
-    public static boolean verifyToken(String token) {
+    public static boolean verifyToken(String token, Integer aheadTime) {
+        if (StringUtils.isEmpty(token)) {
+            return false;
+        }
         Calendar calendar = Calendar.getInstance();
-        calendar.add(Calendar.MINUTE, 1);
+        calendar.add(Calendar.MINUTE, aheadTime);
         return JWT.decode(token).getExpiresAt().after(calendar.getTime());
     }
 
-    public void sendOtp(UserContext userContext, String mobile) throws IOException {
+    @Override
+    public void sendOtp(UserContext userContext, String mobile, boolean updateUser) throws IOException {
         GenerateOtpRequest generateOtpRequest = new GenerateOtpRequest();
         generateOtpRequest.setMobile(mobile);
         generateOtpRequest.setSecret("U2FsdGVkX1+Q9WSjibR49ZLvW1GLyoI4++gxOdFB2hqkj7drbStUz2n3Je3aBr7GaoRkHWPw9/nRY6y/pOLOQQ==");
         userContext.setTxnId(cowin.generateOTP(generateOtpRequest).getBody().getTxnId());
-        sendMessage(userContext.getChatId(), "Enter Otp");
+        Date currTime = new Date();
+        log.info("user {} send time {}", userContext.getMobile(), currTime);
+        userContext.setOtpSentTime(currTime.getTime());
+        if (updateUser) {
+            sendMessage(userContext.getChatId(), "Enter Otp");
+        }
     }
 
     private void sendCaptcha(UserContext userContext) throws IOException, TranscoderException {
@@ -514,7 +547,13 @@ public class TelegramBotServiceImpl implements TelegramBotService {
         return ostream.toByteArray();
     }
 
-    private SendResponse sendMessage(Long chatId, String message) {
+    @Override
+    public SendResponse removeKeyboard(UserContext userContext) {
+        return sendMessage(userContext.getChatId(), Strings.EMPTY, new ReplyKeyboardRemove());
+    }
+
+    @Override
+    public SendResponse sendMessage(Long chatId, String message) {
         return telegramBot.execute(new SendMessage(chatId, message));
     }
 
@@ -524,7 +563,7 @@ public class TelegramBotServiceImpl implements TelegramBotService {
         return telegramBot.execute(sendMessage);
     }
 
-    private SendResponse sendMessage(Long chatId, String message, ReplyKeyboardMarkup replyKeyboardMarkup) {
+    private SendResponse sendMessage(Long chatId, String message, Keyboard replyKeyboardMarkup) {
         SendMessage sendMessage = new SendMessage(chatId, message);
         sendMessage.replyMarkup(replyKeyboardMarkup);
         return telegramBot.execute(sendMessage);

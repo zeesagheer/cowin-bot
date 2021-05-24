@@ -6,12 +6,12 @@ import com.fasterxml.jackson.annotation.PropertyAccessor;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pengrad.telegrambot.TelegramBot;
-import com.pengrad.telegrambot.UpdatesListener;
 import com.zeeshan.cowin.service.TelegramBotService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.BufferingClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpRequestFactory;
@@ -32,6 +32,7 @@ import java.util.List;
 
 @SpringBootApplication
 @EnableScheduling
+@EnableJpaRepositories(basePackages = "com.zeeshan.cowin.repositories")
 public class CowinApplication {
 
     public static void main(String[] args) {
@@ -46,6 +47,9 @@ public class CowinApplication {
         System.clearProperty("http.proxyPassword");
 
         HttpComponentsClientHttpRequestFactory factory = new HttpComponentsClientHttpRequestFactory();
+//        HttpClientBuilder.create()
+//                .setProxy(new HttpHost("14.140.131.82", 3128, "http"))
+//                .build());
         factory.setConnectionRequestTimeout(10000);
         factory.setReadTimeout(10000);
         factory.setConnectTimeout(10000);
@@ -96,10 +100,10 @@ public class CowinApplication {
     @Bean
     public TelegramBot getTelegramBot(@Value("${telegram.bot.token}") String token, TelegramBotService telegramBotService) {
         TelegramBot telegramBot = new TelegramBot(token);
-        telegramBot.setUpdatesListener(updates -> {
-            updates.forEach(telegramBotService::executeAction);
-            return UpdatesListener.CONFIRMED_UPDATES_ALL;
-        });
+//        telegramBot.setUpdatesListener(updates -> {
+//            updates.forEach(telegramBotService::executeAction);
+//            return UpdatesListener.CONFIRMED_UPDATES_ALL;
+//        });
         return telegramBot;
     }
 

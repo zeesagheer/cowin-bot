@@ -5,6 +5,8 @@ import com.zeeshan.cowin.dto.CowinRequest;
 import com.zeeshan.cowin.dto.CowinResponse;
 import com.zeeshan.cowin.dto.PlanRequest;
 import com.zeeshan.cowin.dto.Result;
+import com.zeeshan.cowin.entities.CowinResult;
+import com.zeeshan.cowin.repositories.CowinResultsRepo;
 import com.zeeshan.cowin.service.CowinService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -16,10 +18,7 @@ import java.io.IOException;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -34,6 +33,9 @@ public class CowinServiceImpl implements CowinService {
     @Autowired
     CowinPageAdapter cowinPageAdapter;
 
+    @Autowired
+    CowinResultsRepo repo;
+
     @Override
     public List<Result> getPlans(PlanRequest planRequest) throws IOException {
         CowinRequest request = new CowinRequest();
@@ -41,6 +43,7 @@ public class CowinServiceImpl implements CowinService {
         request.setDate(now.format(dateTimeFormatter));
         request.setPinCode(planRequest.getPinCode());
         request.setDistrictId(planRequest.getDistrictId());
+        request.setToken(planRequest.getToken());
         ResponseEntity<CowinResponse> response = cowinPageAdapter.getSlots(request);
         List<Result> results = new ArrayList<>();
         if (response.getBody() != null) {
@@ -56,10 +59,13 @@ public class CowinServiceImpl implements CowinService {
                                     .toMap(CowinResponse.Centers.Vaccine::getVaccine,
                                             CowinResponse.Centers.Vaccine::getFee)));
                 }
+                List<CowinResult> debugList = new ArrayList<>();
                 center.getSessions().stream()
-                        .filter(session -> !planRequest.getSkipSessions().contains(session.getSession_id()))
                         .filter(session -> session.getAvailable_capacity() > 0)
+                        .peek(session -> debugList.add(convert(center, session, planRequest, UUID.randomUUID().toString())))
+                        .filter(session -> !planRequest.getSkipSessions().contains(session.getSession_id()))
                         .forEach(session -> results.add(convert(center, priceMap, session)));
+                repo.saveAll(debugList);
             });
         }
         return results;
@@ -87,6 +93,28 @@ public class CowinServiceImpl implements CowinService {
         } else {
             result.setFees("No Info");
         }
+        return result;
+    }
+
+
+    private CowinResult convert(CowinResponse.Centers center, CowinResponse.Centers.Session session, PlanRequest planRequest, String uuid) {
+        CowinResult result = new CowinResult();
+        result.setCenterId(center.getCenter_id());
+        result.setName(center.getName());
+        result.setPinCode(center.getPincode());
+        result.setAge(session.getMin_age_limit());
+        result.setDate(session.getDate());
+        result.setVaccine(session.getVaccine());
+        result.setDose(session.getAvailable_capacity());
+        result.setDose1(session.getAvailable_capacity_dose1());
+        result.setDose2(session.getAvailable_capacity_dose2());
+        result.setSessionId(session.getSession_id());
+
+        result.setSearchedDistrictId(planRequest.getDistrictId());
+        result.setSearchedPinCode(planRequest.getPinCode());
+        result.setIsToken(StringUtils.isNotEmpty(planRequest.getToken()));
+        result.setUuid(uuid);
+
         return result;
     }
 }

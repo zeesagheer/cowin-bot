@@ -7,6 +7,7 @@ import java.util.Set;
 
 @Data
 public class PlanRequest {
+    private String token;
     private String pinCode;
     private String districtId;
     private Set<String> skipSessions = new HashSet<>();

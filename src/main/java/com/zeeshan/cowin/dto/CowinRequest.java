@@ -7,4 +7,5 @@ public class CowinRequest {
     private String districtId;
     private String pinCode;
     private String date;
+    private String token;
 }

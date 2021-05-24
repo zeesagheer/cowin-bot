@@ -2,9 +2,11 @@ package com.zeeshan.cowin.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pengrad.telegrambot.TelegramBot;
+import com.zeeshan.cowin.adapter.OtpAdapter;
 import com.zeeshan.cowin.adapter.TelegramBotAdapter;
 import com.zeeshan.cowin.dto.PlanRequest;
 import com.zeeshan.cowin.dto.Result;
+import com.zeeshan.cowin.service.dto.UserContext;
 import com.zeeshan.cowin.service.impl.TelegramBotServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +27,9 @@ public class CowinPollingService {
     TelegramBotAdapter telegramBotAdapter;
 
     @Autowired
+    OtpAdapter otpAdapter;
+
+    @Autowired
     CowinService cowinService;
 
     @Autowired
@@ -40,6 +45,7 @@ public class CowinPollingService {
     String chatId;
 
     Set<String> projectedSessions = new HashSet<>();
+    Set<String> projectedSessionsWithToken = new HashSet<>();
 
     public static Map<String, Set<String>> districtPinCodeMap = new ConcurrentHashMap<>();
 
@@ -75,6 +81,14 @@ public class CowinPollingService {
                 log.info("Call for pincode {}", query);
             }
             planRequest.setSkipSessions(projectedSessions);
+            TelegramBotServiceImpl.userContextMap.values().stream()
+                    .filter(UserContext::isAdmin)
+                    .filter(userContext -> TelegramBotServiceImpl.verifyToken(userContext.getToken(), 1))
+                    .findAny().ifPresent(userContext -> {
+                planRequest.setToken(userContext.getToken());
+                planRequest.setSkipSessions(projectedSessionsWithToken);
+                log.info("Setting token with admin user : {}", userContext.getMobile());
+            });
             List<Result> results = cowinService.getPlans(planRequest);
             if (isDistrict && !planRequest.getPinCodesInDistrict().isEmpty()) {
                 districtPinCodeMap.put(query, planRequest.getPinCodesInDistrict());
@@ -95,7 +109,7 @@ public class CowinPollingService {
                 telegramBotService.sendToRegisteredUsers(registeredUsers, resultList);
                 chatIds.removeAll(registeredUsers);
             });
-            results.parallelStream().map(Result::getSessionId).forEach(projectedSessions::add);
+            results.parallelStream().map(Result::getSessionId).forEach(planRequest.getSkipSessions()::add);
             telegramBotService.sendToRegisteredUsers(chatIds, results);
 
         } catch (IOException e) {
